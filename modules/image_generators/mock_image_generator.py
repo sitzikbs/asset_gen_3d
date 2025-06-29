@@ -1,12 +1,24 @@
+import os
+import logging
 from .base_image_generator import BaseImageGenerator
+from typing import Dict, Any
 
 class MockImageGenerator(BaseImageGenerator):
-    def __init__(self, secrets=None):
-        pass
+    def __init__(self, secrets: Dict[str, Any], output_dir: str = "output/images") -> None:
+        super().__init__(secrets)
+        self.output_dir = output_dir
 
-    def generate_image(self, prompt):
+    def generate_image(self, prompt: str, prompt_name: str) -> str:
         """
-        Generates a mock image path.
+        Generates a mock image file and returns its path.
         """
-        print(f"--- Mock image generation for prompt: '{prompt}' ---")
-        return "path/to/mock/image.png"
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir, exist_ok=True)
+        logging.info(f"MockImageGenerator: Generating image for '{prompt_name}'.")
+        mock_image_path = os.path.join(self.output_dir, f"{prompt_name}.png")
+        
+        with open(mock_image_path, "w") as f:
+            f.write(f"This is a mock image for prompt: {prompt_name}")
+            
+        logging.info(f"--- Mock image generated at: '{mock_image_path}' ---")
+        return mock_image_path
