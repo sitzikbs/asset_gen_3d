@@ -4,6 +4,7 @@ import argparse
 import logging
 import os
 import shutil
+import uuid
 from typing import Dict, Any, Optional, List
 
 from modules.text_generators.base_text_generator import BaseTextGenerator
@@ -16,22 +17,32 @@ class Pipeline:
     text_generator: BaseTextGenerator
     image_generator: BaseImageGenerator
     asset_generator: BaseAssetGenerator
+    base_output_dir: str
+    identifier: str
 
-    def __init__(self, config: Dict[str, Any], secrets: Dict[str, Any], debug: bool = False) -> None:
+    def __init__(self, config: Dict[str, Any], secrets: Dict[str, Any], debug: bool = False, identifier: Optional[str] = None) -> None:
+        if identifier is None:
+            if debug:
+                identifier = "debug_run"
+            else:
+                logging.info("No experiment identifier provided, generating a new unique identifier for this run.")
+                identifier = str(uuid.uuid4())
+        self.identifier = identifier
+        self.base_output_dir = os.path.join("output", identifier)
         if debug:
             logging.info("Running in debug mode. Using mock generators.")
             from modules.text_generators.mock_text_generator import MockTextGenerator
             from modules.image_generators.mock_image_generator import MockImageGenerator
             from modules.asset_generators.mock_asset_generator import MockAssetGenerator
-            self.text_generator = MockTextGenerator(secrets={})
-            self.image_generator = MockImageGenerator(secrets={})
-            self.asset_generator = MockAssetGenerator(secrets={})
+            self.text_generator = MockTextGenerator(secrets={}, output_dir=os.path.join(self.base_output_dir, "prompts"))
+            self.image_generator = MockImageGenerator(secrets={}, output_dir=os.path.join(self.base_output_dir, "images"))
+            self.asset_generator = MockAssetGenerator(secrets={}, output_dir=os.path.join(self.base_output_dir, "assets"))
         else:
-            self.text_generator = self._load_generator('text_generators', config.get('text_generator', {}), secrets)
-            self.image_generator = self._load_generator('image_generators', config.get('image_generator', {}), secrets)
-            self.asset_generator = self._load_generator('asset_generators', config.get('asset_generator', {}), secrets)
+            self.text_generator = self._load_generator('text_generators', config.get('text_generator', {}), secrets, os.path.join(self.base_output_dir, "prompts"))
+            self.image_generator = self._load_generator('image_generators', config.get('image_generator', {}), secrets, os.path.join(self.base_output_dir, "images"))
+            self.asset_generator = self._load_generator('asset_generators', config.get('asset_generator', {}), secrets, os.path.join(self.base_output_dir, "assets"))
 
-    def _load_generator(self, module_type: str, config: Dict[str, str], secrets: Dict[str, Any]) -> Optional[Any]:
+    def _load_generator(self, module_type: str, config: Dict[str, str], secrets: Dict[str, Any], output_dir: str) -> Optional[Any]:
         try:
             if not config or 'module' not in config or 'class' not in config:
                 raise KeyError(f"Generator configuration is missing or incomplete for {module_type}")
@@ -40,23 +51,20 @@ class Pipeline:
             module = importlib.import_module(module_name)
             generator_class = getattr(module, config['class'])
             logging.debug(f"Successfully loaded generator class: {config['class']}")
-            # Pass secrets to the generator's constructor
-            return generator_class(secrets=secrets)
+            return generator_class(secrets=secrets, output_dir=output_dir)
         except (ImportError, AttributeError, KeyError) as e:
             logging.error(f"Error loading generator: {e}")
             logging.info(f"Falling back to mock generator for {module_type}.")
-            # Mocks don't need secrets, so we pass an empty dict
             if module_type == 'text_generators':
                 from modules.text_generators.mock_text_generator import MockTextGenerator
-                return MockTextGenerator(secrets={})
+                return MockTextGenerator(secrets={}, output_dir=output_dir)
             elif module_type == 'image_generators':
                 from modules.image_generators.mock_image_generator import MockImageGenerator
-                return MockImageGenerator(secrets={})
+                return MockImageGenerator(secrets={}, output_dir=output_dir)
             elif module_type == 'asset_generators':
                 from modules.asset_generators.mock_asset_generator import MockAssetGenerator
-                return MockAssetGenerator(secrets={})
-            return None # Should not be reached
-
+                return MockAssetGenerator(secrets={}, output_dir=output_dir)
+            return None
 
     def _run_single_prompt(self, base_prompt_text: str, prompt_name: str) -> Dict[str, str]:
         """Runs a single prompt through the pipeline and returns the artifact paths."""
@@ -79,25 +87,18 @@ class Pipeline:
         }
 
     def run(self, prompts_data: Dict[str, List[Dict[str, str]]]) -> None:
-        """Runs the asset generation pipeline for all prompts."""
-        prompts_output_dir = "output/prompts"
-        os.makedirs(prompts_output_dir, exist_ok=True)
-
+        prompts_output_dir = os.path.join(self.base_output_dir, "prompts")
         for base_prompt_info in prompts_data['prompts']:
             prompt_name = base_prompt_info['name']
             base_prompt_text = base_prompt_info['text']
             logging.info(f"--- Running pipeline for prompt: {prompt_name} ---")
-            
             artifacts = self._run_single_prompt(base_prompt_text, prompt_name)
-
-            # The generators place the files in the correct directories.
-            # We just need to save the details JSON.
             if artifacts.get("asset_path"):
-                # Save prompt details and artifact paths to a JSON file
                 details_path = os.path.join(prompts_output_dir, f"{prompt_name}.json")
                 details_data = {
                     "prompt_name": prompt_name,
                     "base_prompt_text": base_prompt_text,
+                    "identifier": self.identifier,
                     "artifacts": artifacts
                 }
                 with open(details_path, 'w') as f:
@@ -105,7 +106,6 @@ class Pipeline:
                 logging.info(f"Saved prompt details to: {details_path}")
             else:
                 logging.error(f"Asset generation failed for prompt: {prompt_name}")
-
             logging.info(f"--- Pipeline run for {prompt_name} finished ---")
 
 
@@ -115,6 +115,7 @@ def main() -> None:
     parser.add_argument('--secrets', type=str, default='secrets.json', help='Path to the secrets file.')
     parser.add_argument('--prompts', type=str, default='configs/prompts.json', help='Path to the prompts file.')
     parser.add_argument('--debug', action='store_true', help='Run in debug mode using mock generators.')
+    parser.add_argument('--identifier', type=str, default=None, help='Optional run identifier for output directory.')
     args = parser.parse_args()
 
     # Configure logging based on debug flag
@@ -135,7 +136,7 @@ def main() -> None:
         logging.error("Exiting due to configuration or secrets errors.")
         return
 
-    pipeline = Pipeline(config, secrets, args.debug)
+    pipeline = Pipeline(config, secrets, args.debug, identifier=args.identifier)
     pipeline.run(prompts_data)
 
 
