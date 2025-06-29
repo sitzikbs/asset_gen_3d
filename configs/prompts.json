@@ -1,0 +1,12 @@
+{
+  "prompts": [
+    {
+      "name": "fantasy_creature",
+      "text": "A mythical creature from a fantasy world."
+    },
+    {
+      "name": "sci_fi_vehicle",
+      "text": "A futuristic vehicle from a science fiction story."
+    }
+  ]
+}

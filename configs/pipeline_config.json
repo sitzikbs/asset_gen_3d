@@ -1,0 +1,14 @@
+{
+  "text_generator": {
+    "module": "mock_text_generator",
+    "class": "MockTextGenerator"
+  },
+  "image_generator": {
+    "module": "mock_image_generator",
+    "class": "MockImageGenerator"
+  },
+  "asset_generator": {
+    "module": "mock_asset_generator",
+    "class": "MockAssetGenerator"
+  }
+}
