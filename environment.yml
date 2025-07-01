@@ -1,0 +1,25 @@
+name: asset_gen
+channels:
+  - defaults
+  - conda-forge
+  - pytorch
+  - nvidia
+dependencies:
+  - python=3.10
+  - pip
+  - numpy
+  - pillow
+  - protobuf
+  - tokenizers
+  - pytorch=2.5.0
+  - torchvision=0.20.0
+  - torchaudio=2.5.0
+  - pytorch-cuda=12.4
+  - pip:
+      - diffusers
+      - transformers
+      - sentencepiece
+      - accelerate
+      - huggingface_hub
+      - charset_normalizer
+      - chardet

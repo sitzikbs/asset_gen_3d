@@ -1,1 +1,12 @@
-# Add your project dependencies here
+diffusers
+transformers
+sentencepiece
+accelerate
+huggingface_hub
+protobuf
+pillow
+numpy
+tokenizers
+charset_normalizer
+Pillow
+chardet

@@ -3,7 +3,6 @@ import importlib
 import argparse
 import logging
 import os
-import shutil
 import uuid
 from typing import Dict, Any, Optional, List
 
@@ -11,9 +10,15 @@ from modules.text_generators.base_text_generator import BaseTextGenerator
 from modules.image_generators.base_image_generator import BaseImageGenerator
 from modules.asset_generators.base_asset_generator import BaseAssetGenerator
 from utils.file_utils import load_json_config
+from utils.pipeline_utils import get_identifier, configure_logging, get_configs, validate_configs
 
 
 class Pipeline:
+    """
+    Orchestrates the 3D asset generation pipeline using modular generator classes.
+    Handles configuration, output directory structure, and the full prompt-to-asset workflow.
+    """
+
     text_generator: BaseTextGenerator
     image_generator: BaseImageGenerator
     asset_generator: BaseAssetGenerator
@@ -21,14 +26,11 @@ class Pipeline:
     identifier: str
 
     def __init__(self, config: Dict[str, Any], secrets: Dict[str, Any], debug: bool = False, identifier: Optional[str] = None) -> None:
-        if identifier is None:
-            if debug:
-                identifier = "debug_run"
-            else:
-                logging.info("No experiment identifier provided, generating a new unique identifier for this run.")
-                identifier = str(uuid.uuid4())
-        self.identifier = identifier
-        self.base_output_dir = os.path.join("output", identifier)
+        """
+        Initializes the pipeline, sets up output directories, and loads generator classes.
+        """
+        self.identifier = get_identifier(debug, identifier)
+        self.base_output_dir = os.path.join("output", self.identifier)
         if debug:
             logging.info("Running in debug mode. Using mock generators.")
             from modules.text_generators.mock_text_generator import MockTextGenerator
@@ -43,6 +45,10 @@ class Pipeline:
             self.asset_generator = self._load_generator('asset_generators', config.get('asset_generator', {}), secrets, os.path.join(self.base_output_dir, "assets"))
 
     def _load_generator(self, module_type: str, config: Dict[str, str], secrets: Dict[str, Any], output_dir: str) -> Optional[Any]:
+        """
+        Dynamically loads and instantiates a generator class based on config.
+        Falls back to a mock generator if loading fails.
+        """
         try:
             if not config or 'module' not in config or 'class' not in config:
                 raise KeyError(f"Generator configuration is missing or incomplete for {module_type}")
@@ -87,6 +93,10 @@ class Pipeline:
         }
 
     def run(self, prompts_data: Dict[str, List[Dict[str, str]]]) -> None:
+        """
+        Runs the asset generation pipeline for all prompts in the provided data.
+        Saves results and logs progress for each prompt.
+        """
         prompts_output_dir = os.path.join(self.base_output_dir, "prompts")
         for base_prompt_info in prompts_data['prompts']:
             prompt_name = base_prompt_info['name']
@@ -101,8 +111,10 @@ class Pipeline:
                     "identifier": self.identifier,
                     "artifacts": artifacts
                 }
+
                 with open(details_path, 'w') as f:
                     json.dump(details_data, f, indent=4)
+
                 logging.info(f"Saved prompt details to: {details_path}")
             else:
                 logging.error(f"Asset generation failed for prompt: {prompt_name}")
@@ -118,24 +130,10 @@ def main() -> None:
     parser.add_argument('--identifier', type=str, default=None, help='Optional run identifier for output directory.')
     args = parser.parse_args()
 
-    # Configure logging based on debug flag
-    log_level = logging.DEBUG if args.debug else logging.INFO
-    logging.basicConfig(level=log_level, format='%(asctime)s - %(levelname)s - %(message)s')
-
-    # In debug mode, we don't need to load the real configs or secrets
-    if args.debug:
-        config = {}
-        prompts_data = {"prompts": [{"name": "debug_prompt", "text": "A test prompt for debugging."}]}
-        secrets = {}
-    else:
-        config = load_json_config(args.config)
-        prompts_data = load_json_config(args.prompts)
-        secrets = load_json_config(args.secrets)
-
-    if (config is None or prompts_data is None or secrets is None or not prompts_data.get('prompts')):
-        logging.error("Exiting due to configuration or secrets errors.")
+    configure_logging(args.debug)
+    config, prompts_data, secrets = get_configs(args)
+    if not validate_configs(config, prompts_data, secrets):
         return
-
     pipeline = Pipeline(config, secrets, args.debug, identifier=args.identifier)
     pipeline.run(prompts_data)
 
