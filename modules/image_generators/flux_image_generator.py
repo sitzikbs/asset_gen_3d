@@ -4,7 +4,6 @@ from modules.image_generators.base_image_generator import BaseImageGenerator
 import torch
 from diffusers import FluxPipeline
 
-
 class FluxImageGenerator(BaseImageGenerator):
     """
     Image generator using any FLUX.1 model via Hugging Face diffusers.
@@ -15,13 +14,14 @@ class FluxImageGenerator(BaseImageGenerator):
         self.model_id = model_id
         # Detect device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        torch_dtype = torch.float16 if self.device.type == "cuda" else torch.float32
+        torch_dtype = torch.bfloat16 if self.device.type == "cuda" else torch.bfloat32
         self.pipe = FluxPipeline.from_pretrained(
             self.model_id,
             torch_dtype=torch_dtype
         )
 
         self.pipe.to(self.device)
+        self.pipe.enable_model_cpu_offload()
 
     def generate_image(self, prompt: str, prompt_name: Optional[str] = None, **kwargs) -> str:
         """
@@ -50,6 +50,8 @@ class FluxImageGenerator(BaseImageGenerator):
             pipe_args['guidance_scale'] = kwargs.get('guidance_scale', 3.5)
             pipe_args['num_inference_steps'] = kwargs.get('num_inference_steps', 50)
             pipe_args['max_sequence_length'] = kwargs.get('max_sequence_length', 512)
+        
+        print(f"Generating image with parameters: {pipe_args}")
         image = self.pipe(**pipe_args).images[0]
         image.save(image_path)
         return image_path
@@ -72,8 +74,9 @@ def test_flux_image_generator(show_image: bool = True, cleanup: bool = False, mo
     os.makedirs(debug_dir, exist_ok=True)
 
     generator = FluxImageGenerator(secrets={}, output_dir=debug_dir, model_id=model_id)
-    prompt = "A futuristic city skyline at sunset"
-    prompt_name = f"test_city_sunset_{model_id.split('/')[-1]}"
+    prompt = "A medieval treasure chest in a computer graphics style with intricate details, " \
+              "glowing runes, and a mystical aura, set against a white background."
+    prompt_name = f"test_medieval_treasure_chest_{model_id.split('/')[-1]}"
     image_path = generator.generate_image(prompt, prompt_name)
     assert os.path.exists(image_path), f"Image file was not created: {image_path}"
     print(f"Generated image for prompt '{prompt_name}' at: {image_path}")

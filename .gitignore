@@ -67,6 +67,7 @@ VENV/
 
 # Output directory
 output/
+outputs/
 
 # Secrets
 secrets.json
