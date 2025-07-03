@@ -1,12 +1,16 @@
-diffusers
-transformers
+torch==2.4.0
+torchvision==0.19.0
+--extra-index-url https://download.pytorch.org/whl/cu124
+diffusers==0.34.0
+transformers==4.38.2
+huggingface_hub==0.33.1
+bitsandbytes==0.42.0
 sentencepiece
-accelerate
-huggingface_hub
-protobuf
-pillow
-numpy
-tokenizers
+accelerate==1.7.0
 charset_normalizer
-Pillow
 chardet
+xformers==0.0.27.post2
+numpy
+pillow
+protobuf
+tokenizers==0.15.2

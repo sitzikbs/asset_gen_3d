@@ -4,6 +4,20 @@ from modules.image_generators.base_image_generator import BaseImageGenerator
 import torch
 from diffusers import FluxPipeline
 
+def get_model_size_in_ram(model):
+    """calculate the real size of a pyutorch model in RAM for debugging
+
+    """
+    total_size_bytes = 0
+    for param in model.parameters():
+        total_size_bytes += param.nelement() * param.element_size()
+    for buffer in model.buffers():
+        total_size_bytes += buffer.nelement() * buffer.element_size()
+    # Convert bytes to megabytes
+    total_size_mbytes = total_size_bytes / (1024 * 1024)  # Convert to MB
+    return total_size_mbytes
+
+
 class FluxImageGenerator(BaseImageGenerator):
     """
     Image generator using any FLUX.1 model via Hugging Face diffusers.
@@ -17,11 +31,19 @@ class FluxImageGenerator(BaseImageGenerator):
         torch_dtype = torch.bfloat16 if self.device.type == "cuda" else torch.bfloat32
         self.pipe = FluxPipeline.from_pretrained(
             self.model_id,
-            torch_dtype=torch_dtype
+            torch_dtype=torch_dtype,
+            load_in_4bit=True if self.device.type == "cuda" else False,
         )
-
+        
+        transformer_size_mb = get_model_size_in_ram(self.pipe.transformer)
+        vae_size_mb = get_model_size_in_ram(self.pipe.vae)
+        total_size_mb = transformer_size_mb + vae_size_mb
+        print(f"Model sizes - Transformer: {transformer_size_mb:.2f} MB, VAE: {vae_size_mb:.2f} MB, Total: {total_size_mb:.2f} MB")
+        breakpoint()
         self.pipe.to(self.device)
         self.pipe.enable_model_cpu_offload()
+        # self.pipe = torch.compile(self.pipe, mode="reduce-overhead")
+
 
     def generate_image(self, prompt: str, prompt_name: Optional[str] = None, **kwargs) -> str:
         """
