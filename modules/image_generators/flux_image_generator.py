@@ -2,12 +2,13 @@ import os
 from typing import Any, Dict, Optional, Literal
 from modules.image_generators.base_image_generator import BaseImageGenerator
 import torch
-from diffusers import FluxPipeline, FluxTransformer2DModel, AutoencoderKL
-from transformers import BitsAndBytesConfig, T5EncoderModel, CLIPTextModel
+import logging
+from diffusers import FluxPipeline
 
 from diffusers.quantizers import PipelineQuantizationConfig
 from diffusers import BitsAndBytesConfig as DiffusersBitsAndBytesConfig
 from transformers import BitsAndBytesConfig as TransformersBitsAndBytesConfig
+
 
 class FluxImageGenerator(BaseImageGenerator):
     """
