@@ -5,6 +5,9 @@ import torch
 from diffusers import FluxPipeline, FluxTransformer2DModel, AutoencoderKL
 from transformers import BitsAndBytesConfig, T5EncoderModel, CLIPTextModel
 
+from diffusers.quantizers import PipelineQuantizationConfig
+from diffusers import BitsAndBytesConfig as DiffusersBitsAndBytesConfig
+from transformers import BitsAndBytesConfig as TransformersBitsAndBytesConfig
 
 class FluxImageGenerator(BaseImageGenerator):
     """
@@ -22,57 +25,18 @@ class FluxImageGenerator(BaseImageGenerator):
 
         if not self.quantization_type == "none":
             if self.quantization_type == "4bit":
-                quantization_config = BitsAndBytesConfig(
-                    load_in_4bit=True,
-                    bnb_4bit_quant_type="nf4",
-                    # bnb_4bit_use_double_quant=True,
-                    bnb_4bit_compute_dtype=torch_dtype,
-                )
+                quant_config = self._get_4bit_quantization_config()
             elif self.quantization_type == "8bit":
-                quantization_config = BitsAndBytesConfig(
-                    load_in_8bit=True,
-                    # bnb_8bit_use_double_quant=True,
-                    bnb_8bit_compute_dtype=torch_dtype,
-                )
+                quant_config = self._get_8bit_quantization_config()
             else:
                 raise ValueError(f"Unsupported quantization type: {self.quantization_type}. Use 'none', '4bit', or '8bit'.")
-            
-            transformer = FluxTransformer2DModel.from_pretrained(
-                self.model_id,
-                quantization_config=quantization_config,
-                torch_dtype=torch_dtype,
-                subfolder="transformer",
-            )
-            text_encoder_two = T5EncoderModel.from_pretrained(
-                self.model_id,
-                subfolder="text_encoder_2",
-                quantization_config=quantization_config,
-                torch_dtype=torch_dtype,
-            )
-            text_encoder_one = CLIPTextModel.from_pretrained(
-                self.model_id,
-                subfolder="text_encoder",
-                quantization_config=quantization_config,
-                torch_dtype=torch_dtype,
-            )
-            vae = AutoencoderKL.from_pretrained(
-                self.model_id,
-                subfolder="vae",
-                quantization_config=quantization_config,
-                torch_dtype=torch_dtype,
-            )
 
             self.pipe = FluxPipeline.from_pretrained(
                 self.model_id,
-                transformer=transformer,
-                text_encoder=text_encoder_one,
-                text_encoder_2=text_encoder_two,
-                vae=vae,
+                quantization_config=quant_config,
                 torch_dtype=torch_dtype,
-            )
+            ).to(self.device)
 
-            self.pipe.to(self.device)
-           
         else: 
             self.pipe = FluxPipeline.from_pretrained(
             self.model_id,
@@ -81,7 +45,31 @@ class FluxImageGenerator(BaseImageGenerator):
             self.pipe.enable_sequential_cpu_offload()
         
 
-
+    def _get_4bit_quantization_config(self) -> PipelineQuantizationConfig:
+        """
+        Returns a quantization configuration for 4-bit quantization.
+        """
+        return PipelineQuantizationConfig(
+            quant_mapping={
+                "transformer": DiffusersBitsAndBytesConfig(load_in_4bit=True),
+                "text_encoder": TransformersBitsAndBytesConfig(load_in_4bit=True),
+                "text_encoder_2": TransformersBitsAndBytesConfig(load_in_4bit=True),
+                "vae": DiffusersBitsAndBytesConfig(load_in_4bit=True),
+            }
+        )
+    
+    def _get_8bit_quantization_config(self) -> PipelineQuantizationConfig:
+        """
+        Returns a quantization configuration for 8-bit quantization.
+        """
+        return PipelineQuantizationConfig(
+            quant_mapping={
+                "transformer": DiffusersBitsAndBytesConfig(load_in_8bit=True),
+                "text_encoder": TransformersBitsAndBytesConfig(load_in_8bit=True),
+                "text_encoder_2": TransformersBitsAndBytesConfig(load_in_8bit=True),
+                "vae": DiffusersBitsAndBytesConfig(load_in_8bit=True),
+            }
+        )
 
     def generate_image(self, prompt: str, prompt_name: Optional[str] = None, **kwargs) -> str:
         """
@@ -163,5 +151,5 @@ def test_flux_image_generator(show_image: bool = True, cleanup: bool = False, mo
 if __name__ == "__main__":
     # Example: test with schnell and dev
 
-    test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-schnell", quantization_type="8bit")
+    test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-schnell", quantization_type="4bit")
     # test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-dev")
