@@ -8,7 +8,7 @@ set -e
 # Configuration
 VENV_NAME=".venv"
 PYTHON_VERSION="3.10"
-CUDA_VERSION="124"  # For CUDA 12.4
+CUDA_VERSION="121"  # For CUDA 12.1
 
 # Text formatting
 BOLD="\033[1m"
@@ -21,7 +21,9 @@ echo -e "${BOLD}${GREEN}=== 3D Asset Generation Environment Setup ===${NC}"
 
 # Check for Python
 echo -e "\n${BOLD}Checking for Python...${NC}"
-if command -v python3 &>/dev/null; then
+if command -v python3.10 &>/dev/null; then
+    PYTHON_CMD="python3.10"
+elif command -v python3 &>/dev/null; then
     PYTHON_CMD="python3"
 elif command -v python &>/dev/null; then
     PYTHON_CMD="python"
@@ -63,15 +65,15 @@ pip install torch==2.4.0 torchvision==0.19.0 --extra-index-url https://download.
 
 # Install remaining packages
 echo -e "\n${BOLD}Installing dependencies...${NC}"
-pip install diffusers==0.34.0 transformers==4.38.2 huggingface_hub==0.33.1
-pip install sentencepiece accelerate==1.7.0 tokenizers==0.15.2
+pip install diffusers==0.34.0 transformers==4.53.2 huggingface_hub==0.33.1
+pip install sentencepiece accelerate==1.8.1 tokenizers==0.21.2
 pip install charset_normalizer chardet protobuf pillow numpy
 pip install "xformers==0.0.27.post2" --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
 
 # Install bitsandbytes with correct CUDA version
 echo -e "\n${BOLD}Installing bitsandbytes for CUDA ${CUDA_VERSION}...${NC}"
-export BNB_CUDA_VERSION=$CUDA_VERSION
-pip install bitsandbytes==0.42.0
+# export BNB_CUDA_VERSION=$CUDA_VERSION
+pip install bitsandbytes==0.46.1
 
 # Verify installations
 echo -e "\n${BOLD}Verifying installations...${NC}"

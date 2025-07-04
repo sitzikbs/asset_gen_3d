@@ -4,19 +4,6 @@ from modules.image_generators.base_image_generator import BaseImageGenerator
 import torch
 from diffusers import FluxPipeline
 
-def get_model_size_in_ram(model):
-    """calculate the real size of a pyutorch model in RAM for debugging
-
-    """
-    total_size_bytes = 0
-    for param in model.parameters():
-        total_size_bytes += param.nelement() * param.element_size()
-    for buffer in model.buffers():
-        total_size_bytes += buffer.nelement() * buffer.element_size()
-    # Convert bytes to megabytes
-    total_size_mbytes = total_size_bytes / (1024 * 1024)  # Convert to MB
-    return total_size_mbytes
-
 
 class FluxImageGenerator(BaseImageGenerator):
     """
@@ -29,20 +16,14 @@ class FluxImageGenerator(BaseImageGenerator):
         # Detect device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         torch_dtype = torch.bfloat16 if self.device.type == "cuda" else torch.bfloat32
+
         self.pipe = FluxPipeline.from_pretrained(
             self.model_id,
             torch_dtype=torch_dtype,
-            load_in_4bit=True if self.device.type == "cuda" else False,
         )
-        
-        transformer_size_mb = get_model_size_in_ram(self.pipe.transformer)
-        vae_size_mb = get_model_size_in_ram(self.pipe.vae)
-        total_size_mb = transformer_size_mb + vae_size_mb
-        print(f"Model sizes - Transformer: {transformer_size_mb:.2f} MB, VAE: {vae_size_mb:.2f} MB, Total: {total_size_mb:.2f} MB")
-        breakpoint()
-        self.pipe.to(self.device)
-        self.pipe.enable_model_cpu_offload()
-        # self.pipe = torch.compile(self.pipe, mode="reduce-overhead")
+
+        self.pipe.enable_sequential_cpu_offload()
+
 
 
     def generate_image(self, prompt: str, prompt_name: Optional[str] = None, **kwargs) -> str:
@@ -74,7 +55,8 @@ class FluxImageGenerator(BaseImageGenerator):
             pipe_args['max_sequence_length'] = kwargs.get('max_sequence_length', 512)
         
         print(f"Generating image with parameters: {pipe_args}")
-        image = self.pipe(**pipe_args).images[0]
+        with torch.inference_mode():
+            image = self.pipe(**pipe_args).images[0]
         image.save(image_path)
         return image_path
 
