@@ -1,8 +1,9 @@
 import os
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Literal
 from modules.image_generators.base_image_generator import BaseImageGenerator
 import torch
-from diffusers import FluxPipeline
+from diffusers import FluxPipeline, FluxTransformer2DModel, AutoencoderKL
+from transformers import BitsAndBytesConfig, T5EncoderModel, CLIPTextModel
 
 
 class FluxImageGenerator(BaseImageGenerator):
@@ -10,19 +11,75 @@ class FluxImageGenerator(BaseImageGenerator):
     Image generator using any FLUX.1 model via Hugging Face diffusers.
     Implements the BaseImageGenerator interface.
     """
-    def __init__(self, secrets: Optional[Dict[str, Any]] = None, output_dir: str = "output/images", model_id: str = "black-forest-labs/FLUX.1-schnell"):
+    def __init__(self, secrets: Optional[Dict[str, Any]] = None, output_dir: str = "output/images", model_id: str = "black-forest-labs/FLUX.1-schnell", quantization_type: Literal["none", "4bit", "8bit"] = "none"):
         super().__init__(secrets or {}, output_dir)
         self.model_id = model_id
+        self.quantization_type = quantization_type
         # Detect device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         torch_dtype = torch.bfloat16 if self.device.type == "cuda" else torch.bfloat32
 
-        self.pipe = FluxPipeline.from_pretrained(
+
+        if not self.quantization_type == "none":
+            if self.quantization_type == "4bit":
+                quantization_config = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    # bnb_4bit_use_double_quant=True,
+                    bnb_4bit_compute_dtype=torch_dtype,
+                )
+            elif self.quantization_type == "8bit":
+                quantization_config = BitsAndBytesConfig(
+                    load_in_8bit=True,
+                    # bnb_8bit_use_double_quant=True,
+                    bnb_8bit_compute_dtype=torch_dtype,
+                )
+            else:
+                raise ValueError(f"Unsupported quantization type: {self.quantization_type}. Use 'none', '4bit', or '8bit'.")
+            
+            transformer = FluxTransformer2DModel.from_pretrained(
+                self.model_id,
+                quantization_config=quantization_config,
+                torch_dtype=torch_dtype,
+                subfolder="transformer",
+            )
+            text_encoder_two = T5EncoderModel.from_pretrained(
+                self.model_id,
+                subfolder="text_encoder_2",
+                quantization_config=quantization_config,
+                torch_dtype=torch_dtype,
+            )
+            text_encoder_one = CLIPTextModel.from_pretrained(
+                self.model_id,
+                subfolder="text_encoder",
+                quantization_config=quantization_config,
+                torch_dtype=torch_dtype,
+            )
+            vae = AutoencoderKL.from_pretrained(
+                self.model_id,
+                subfolder="vae",
+                quantization_config=quantization_config,
+                torch_dtype=torch_dtype,
+            )
+
+            self.pipe = FluxPipeline.from_pretrained(
+                self.model_id,
+                transformer=transformer,
+                text_encoder=text_encoder_one,
+                text_encoder_2=text_encoder_two,
+                vae=vae,
+                torch_dtype=torch_dtype,
+            )
+
+            self.pipe.to(self.device)
+           
+        else: 
+            self.pipe = FluxPipeline.from_pretrained(
             self.model_id,
             torch_dtype=torch_dtype,
-        )
-
-        self.pipe.enable_sequential_cpu_offload()
+            )
+            self.pipe.enable_sequential_cpu_offload()
+        
 
 
 
@@ -55,7 +112,8 @@ class FluxImageGenerator(BaseImageGenerator):
             pipe_args['max_sequence_length'] = kwargs.get('max_sequence_length', 512)
         
         print(f"Generating image with parameters: {pipe_args}")
-        with torch.inference_mode():
+
+        with torch.no_grad():
             image = self.pipe(**pipe_args).images[0]
         image.save(image_path)
         return image_path
@@ -63,7 +121,7 @@ class FluxImageGenerator(BaseImageGenerator):
 
 # Test function for FluxImageGenerator
 
-def test_flux_image_generator(show_image: bool = True, cleanup: bool = False, model_id: str = "black-forest-labs/FLUX.1-schnell"):
+def test_flux_image_generator(show_image: bool = True, cleanup: bool = False, model_id: str = "black-forest-labs/FLUX.1-schnell", quantization_type: Literal["none", "4bit", "8bit"] = "none"):
     """Test the FluxImageGenerator with the specified parameters.
 
     Args:
@@ -77,7 +135,8 @@ def test_flux_image_generator(show_image: bool = True, cleanup: bool = False, mo
     debug_dir = "outputs/debug/image_gen"
     os.makedirs(debug_dir, exist_ok=True)
 
-    generator = FluxImageGenerator(secrets={}, output_dir=debug_dir, model_id=model_id)
+    generator = FluxImageGenerator(secrets={}, output_dir=debug_dir, model_id=model_id, quantization_type=quantization_type)
+
     prompt = "A medieval treasure chest in a computer graphics style with intricate details, " \
               "glowing runes, and a mystical aura, set against a white background."
     prompt_name = f"test_medieval_treasure_chest_{model_id.split('/')[-1]}"
@@ -103,5 +162,6 @@ def test_flux_image_generator(show_image: bool = True, cleanup: bool = False, mo
 
 if __name__ == "__main__":
     # Example: test with schnell and dev
-    test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-schnell")
+
+    test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-schnell", quantization_type="8bit")
     # test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-dev")
