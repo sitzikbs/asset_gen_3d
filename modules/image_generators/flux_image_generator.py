@@ -152,5 +152,5 @@ def test_flux_image_generator(show_image: bool = True, cleanup: bool = False, mo
 if __name__ == "__main__":
     # Example: test with schnell and dev
 
-    test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-schnell", quantization_type="4bit")
-    # test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-dev")
+    # test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-schnell", quantization_type="4bit")
+    test_flux_image_generator(show_image=True, cleanup=False, model_id="black-forest-labs/FLUX.1-dev", quantization_type="4bit")
