@@ -70,6 +70,24 @@ pip install sentencepiece accelerate==1.8.1 tokenizers==0.21.2
 pip install charset_normalizer chardet protobuf pillow numpy
 pip install "xformers==0.0.27.post2" --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
 
+# install trellis dependencies 
+echo -e "\n${BOLD}Installing Trellis dependencies...${NC}"
+pip install imageio imageio-ffmpeg easydict rembg onnxruntime open3d plyfile trimesh xatlas pyvista pymeshfix igraph wheel spconv
+pip install git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
+pip install kaolin -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.4.0_cu121.html
+
+pip install --no-binary :all: flash-attn==2.6.3 --no-build-isolation
+pip install spconv-cu120 
+
+mkdir -p /tmp/extensions
+git clone https://github.com/NVlabs/nvdiffrast.git /tmp/extensions/nvdiffrast
+pip install /tmp/extensions/nvdiffrast
+
+mkdir -p /tmp/extensions
+git clone https://github.com/autonomousvision/mip-splatting.git /tmp/extensions/mip-splatting
+pip install /tmp/extensions/mip-splatting/submodules/diff-gaussian-rasterization/
+
+
 # Install bitsandbytes with correct CUDA version
 echo -e "\n${BOLD}Installing bitsandbytes for CUDA ${CUDA_VERSION}...${NC}"
 # export BNB_CUDA_VERSION=$CUDA_VERSION

@@ -14,3 +14,17 @@ numpy
 pillow
 protobuf
 tokenizers==0.15.2
+imageio
+imageio-ffmpeg
+easydict
+rembg
+onnxruntime
+open3d
+plyfile
+trimesh
+xatlas
+pyvista
+pymeshfix
+igraph
+spconv
+# manually install kaolin and nvdiffrast, spconv, diffoctreerast and flash-attn
