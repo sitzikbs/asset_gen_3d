@@ -14,6 +14,7 @@ from utils.pipeline_utils import get_identifier, configure_logging, get_configs,
 
 
 class Pipeline:
+
     """
     Orchestrates the 3D asset generation pipeline using modular generator classes.
     Handles configuration, output directory structure, and the full prompt-to-asset workflow.
@@ -31,6 +32,16 @@ class Pipeline:
         """
         self.identifier = get_identifier(debug, identifier)
         self.base_output_dir = os.path.join("outputs", self.identifier)
+        self.generation_mode = config.get("generation_mode", "pack")
+        self.num_packs = int(config.get("num_packs", 1))
+        # Set self.run to the correct method for main()
+        if self.generation_mode == "single_asset":
+            self.run = self.run_single_asset
+        elif self.generation_mode == "pack":
+            self.run = lambda *_: self.run_multi_pack(num_packs=self.num_packs)
+        else:
+            raise ValueError(f"Unknown generation_mode: {self.generation_mode}")
+        self.pack_size = int(config.get("pack_size", 3))
         if debug:
             logging.info("Running in debug mode. Using mock generators.")
             from modules.text_generators.mock_text_generator import MockTextGenerator
@@ -40,7 +51,8 @@ class Pipeline:
             self.image_generator = MockImageGenerator(secrets={}, output_dir=os.path.join(self.base_output_dir, "images"))
             self.asset_generator = MockAssetGenerator(secrets={}, output_dir=os.path.join(self.base_output_dir, "assets"))
         else:
-            self.text_generator = self._load_generator('text_generators', config.get('text_generator', {}), secrets, os.path.join(self.base_output_dir, "prompts"))
+            text_gen_cfg = dict(config.get('text_generator', {}))
+            self.text_generator = self._load_generator('text_generators', text_gen_cfg, secrets, os.path.join(self.base_output_dir, "prompts"))
             self.image_generator = self._load_generator('image_generators', config.get('image_generator', {}), secrets, os.path.join(self.base_output_dir, "images"))
             self.asset_generator = self._load_generator('asset_generators', config.get('asset_generator', {}), secrets, os.path.join(self.base_output_dir, "assets"))
 
@@ -74,89 +86,149 @@ class Pipeline:
                 return MockAssetGenerator(secrets={}, output_dir=output_dir)
             return None
 
-    def _run_single_prompt(self, base_prompt_text: str, prompt_name: str) -> Dict[str, str]:
-        """Runs a single prompt through the pipeline and returns the artifact paths."""
-        # 1. Generate a detailed prompt
-        detailed_prompt = self.text_generator.generate_prompt(base_prompt_text, prompt_name=prompt_name)
-        logging.info(f"Generated detailed prompt: {detailed_prompt}")
-
-        # 2. Generate an image (defer asset generation)
-        generated_image_path = self.image_generator.generate_image(detailed_prompt, prompt_name=prompt_name)
-        logging.info(f"Generated image at: {generated_image_path}")
-
-        return {
-            "detailed_prompt": detailed_prompt,
-            "image_path": generated_image_path,
-            # asset_path will be filled in later
-        }
-
-    def run(self, prompts_data: Dict[str, List[Dict[str, str]]]) -> None:
-        """
-        Runs the asset generation pipeline for all prompts in the provided data.
-        If the text generator supports prompt packs, generates all prompts at once.
-        Then generates all images, offloads the image generator, and generates all assets.
-        """
+    def run_single_asset(self):
+        """Generate a single prompt, image, and asset in a flat output directory."""
         prompts_output_dir = os.path.join(self.base_output_dir, "prompts")
-        all_artifacts = {}
+        images_output_dir = os.path.join(self.base_output_dir, "images")
+        assets_output_dir = os.path.join(self.base_output_dir, "assets")
+        os.makedirs(prompts_output_dir, exist_ok=True)
+        os.makedirs(images_output_dir, exist_ok=True)
+        os.makedirs(assets_output_dir, exist_ok=True)
 
-        # 1. Generate all prompts if using a pack generator
-        if hasattr(self.text_generator, "generate_pack"):
-            logging.info("Using prompt pack generator to generate all prompts at once.")
-            pack = self.text_generator.generate_pack(output_dir=prompts_output_dir)
-            prompt_list = pack["prompts"]
+        # Generate a single prompt
+        if hasattr(self.text_generator, "generate_single_prompt"):
+            # Use the modular single prompt method if available
+            prompt_dict = self.text_generator.generate_single_prompt(
+                object_type=None, genre=None, style=None, material=None, color_palette=None, idx=0
+            )
         else:
-            prompt_list = prompts_data['prompts']
+            # Fallback: use generate_prompt and take the first
+            prompt_dict = self.text_generator.generate_prompt()[0]
 
-        # 2. Generate all images
-        for base_prompt_info in prompt_list:
-            prompt_name = base_prompt_info['name']
-            base_prompt_text = base_prompt_info['text']
-            logging.info(f"--- Running pipeline for prompt: {prompt_name} (image generation) ---")
+        prompt_name = prompt_dict["name"]
+        prompt_text = prompt_dict["text"]
+        
+        # Save prompt
+        with open(os.path.join(prompts_output_dir, f"{prompt_name}.json"), "w") as f:
+            json.dump(prompt_dict, f, indent=2)
+        # Generate image
+        image_path = self.image_generator.generate_image(prompt_text, prompt_name=prompt_name)
+        # Generate asset
+        asset_path = self.asset_generator.generate_asset(image_path, prompt_name)
+        # Save summary
+        summary = {
+            "prompt": prompt_dict,
+            "image_path": image_path,
+            "asset_path": asset_path
+        }
+        
+        with open(os.path.join(self.base_output_dir, f"{prompt_name}_summary.json"), "w") as f:
+            json.dump(summary, f, indent=2)
+        logging.info(f"Single asset generation complete: {summary}")
 
-            # If the prompt is a dict (from a pack), use its 'text' directly
-            if isinstance(base_prompt_info, dict):
-                detailed_prompt = base_prompt_info['text']
-            else:
-                detailed_prompt = base_prompt_text
-            generated_image_path = self.image_generator.generate_image(detailed_prompt, prompt_name=prompt_name)
-            logging.info(f"Generated image at: {generated_image_path}")
-            all_artifacts[prompt_name] = {
-                "prompt_name": prompt_name,
-                "base_prompt_text": base_prompt_text,
-                "identifier": self.identifier,
-                "artifacts": {
-                    "detailed_prompt": detailed_prompt,
-                    "image_path": generated_image_path
+    def run_multi_pack(self, num_packs: int = 1):
+        """Generate multiple packs, then organize all outputs into the correct pack directories."""
+        import shutil
+        experiment_dir = self.base_output_dir
+        final_packs_dir = os.path.join(experiment_dir, "final_packs")
+        os.makedirs(final_packs_dir, exist_ok=True)
+        self.pack_outputs = {}
+        all_prompts = []
+        main_prompts_dir = os.path.join(self.base_output_dir, "prompts")
+        os.makedirs(main_prompts_dir, exist_ok=True)
+        for i in range(num_packs):
+            pack_name = f"pack_{i+1}"
+            pack_dir = os.path.join(final_packs_dir, pack_name)
+            os.makedirs(pack_dir, exist_ok=True)
+            # Generate prompts for this pack, passing pack_size from pipeline config (do not save prompts.json automatically)
+            pack = self.text_generator.generate_pack(pack_size=self.pack_size, output_dir=None)
+            prompt_list = pack["prompts"]
+            all_prompts.extend(prompt_list)
+            # Save the prompts for this pack in the pack dir as pack_X_prompts.json
+            pack_prompts_json_path = os.path.join(pack_dir, f"{pack_name}_prompts.json")
+            with open(pack_prompts_json_path, "w") as f:
+                json.dump({"prompts": prompt_list}, f, indent=2)
+            # Save pack metadata (theme info) in the pack dir
+            pack_metadata_path = os.path.join(pack_dir, "pack_metadata.json")
+            with open(pack_metadata_path, "w") as f:
+                json.dump(pack["theme"], f, indent=2)
+            all_artifacts = {}
+            asset_files = []
+            prompt_files = []
+
+            # Move image generator to GPU
+            self.image_generator.to_gpu()
+
+            # Generate images (images are not saved in pack dir, but can be if needed)
+            for base_prompt_info in prompt_list:
+                prompt_name = base_prompt_info['name']
+                prompt_text = base_prompt_info['text']
+                logging.info(f"[Pack {i+1}] Generating image for: {prompt_name}")
+                image_path = self.image_generator.generate_image(prompt_text, prompt_name=prompt_name)
+                all_artifacts[prompt_name] = {
+                    "prompt_name": prompt_name,
+                    "base_prompt_text": prompt_text,
+                    "identifier": self.identifier,
+                    "artifacts": {
+                        "detailed_prompt": prompt_text,
+                        "image_path": image_path
+                    }
                 }
+            # Move image generator to CPU to free GPU memory and clear caches
+            self.image_generator.to_cpu()
+
+            # Group all memory management here for clarity
+            import gc, torch
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            # Generate assets and save prompt+asset details in pack dir
+            for prompt_name, details_data in all_artifacts.items():
+                artifacts = details_data["artifacts"]
+                image_path = artifacts["image_path"]
+                logging.info(f"[Pack {i+1}] Generating asset for: {prompt_name}")
+                try:
+                    asset_path = self.asset_generator.generate_asset(image_path, prompt_name)
+                    artifacts["asset_path"] = asset_path
+                    if asset_path and os.path.isfile(asset_path):
+                        asset_files.append(asset_path)
+                except Exception as e:
+                    logging.error(f"Asset generation failed for prompt: {prompt_name}: {e}")
+                    artifacts["asset_path"] = None
+                # Save details directly in the pack dir
+                details_path = os.path.join(pack_dir, f"{prompt_name}.json")
+                with open(details_path, 'w') as f:
+                    json.dump(details_data, f, indent=4)
+                prompt_files.append(details_path)
+            # Track all outputs for this pack
+            self.pack_outputs[pack_name] = {
+                "pack_dir": pack_dir,
+                "asset_files": asset_files,
+                "prompt_files": prompt_files,
+                "prompts_json": pack_prompts_json_path,
+                "pack_metadata": pack_metadata_path
             }
+            logging.info(f"Pack {i+1} generation complete: {pack_dir}")
+        # Save all prompts for all packs in the main prompts dir as prompts.json
+        main_prompts_json_path = os.path.join(main_prompts_dir, "prompts.json")
+        with open(main_prompts_json_path, "w") as f:
+            json.dump({"prompts": all_prompts}, f, indent=2)
+        # Organize all outputs (copy assets to pack dir, etc.)
+        self.organize_pack_outputs()
 
-        # 3. Offload image generator to free memory
-        logging.info("Offloading image generator to free GPU memory.")
-        del self.image_generator
-        import gc, torch
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-        # 4. Generate all assets
-        for prompt_name, details_data in all_artifacts.items():
-            artifacts = details_data["artifacts"]
-            image_path = artifacts["image_path"]
-            logging.info(f"--- Running pipeline for prompt: {prompt_name} (asset generation) ---")
-            try:
-                asset_path = self.asset_generator.generate_asset(image_path, prompt_name)
-                artifacts["asset_path"] = asset_path
-                logging.info(f"Generated 3D asset at: {asset_path}")
-            except Exception as e:
-                logging.error(f"Asset generation failed for prompt: {prompt_name}: {e}")
-                artifacts["asset_path"] = None
-
-            # Save details after asset generation
-            details_path = os.path.join(prompts_output_dir, f"{prompt_name}.json")
-            with open(details_path, 'w') as f:
-                json.dump(details_data, f, indent=4)
-            logging.info(f"Saved prompt details to: {details_path}")
-            logging.info(f"--- Pipeline run for {prompt_name} finished ---")
+    def organize_pack_outputs(self):
+        """Copy/move all relevant files (assets, prompts, metadata) into their pack directories."""
+        import shutil
+        for pack_name, outputs in self.pack_outputs.items():
+            pack_dir = outputs["pack_dir"]
+            # Copy asset files to pack dir (if not already there)
+            for asset_path in outputs["asset_files"]:
+                if asset_path and os.path.isfile(asset_path):
+                    dest_path = os.path.join(pack_dir, os.path.basename(asset_path))
+                    if os.path.abspath(asset_path) != os.path.abspath(dest_path):
+                        shutil.copy2(asset_path, dest_path)
+            # Prompts and metadata are already saved in the correct place
+        logging.info("All pack outputs organized.")
 
 
 def main() -> None:

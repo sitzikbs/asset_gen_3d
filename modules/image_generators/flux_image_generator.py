@@ -51,6 +51,21 @@ class FluxImageGenerator(BaseImageGenerator):
             self.pipe.enable_sequential_cpu_offload()
 
         logging.info("FluxImageGenerator: Pipeline loaded and ready.")
+
+    def to_cpu(self):
+        """Move the pipeline to CPU."""
+        if hasattr(self, 'pipe') and self.pipe is not None:
+            self.pipe.to('cpu')
+            self.device = torch.device('cpu')
+            logging.info("FluxImageGenerator: Pipeline moved to CPU.")
+
+    def to_gpu(self):
+        """Move the pipeline to GPU if available."""
+        if hasattr(self, 'pipe') and self.pipe is not None and torch.cuda.is_available():
+            self.pipe.to('cuda')
+            self.device = torch.device('cuda')
+            logging.info("FluxImageGenerator: Pipeline moved to GPU.")
+            
     def generate_image(self, prompt: str, prompt_name: str) -> str:
         """
         Generates an image from a prompt and saves it to the output directory.

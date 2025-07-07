@@ -8,6 +8,14 @@ class MockImageGenerator(BaseImageGenerator):
         super().__init__(secrets)
         self.output_dir = output_dir
 
+    def to_cpu(self):
+        """Mock: No-op for moving to CPU."""
+        logging.info("MockImageGenerator: to_cpu() called (no-op).")
+
+    def to_gpu(self):
+        """Mock: No-op for moving to GPU."""
+        logging.info("MockImageGenerator: to_gpu() called (no-op).")
+
     def generate_image(self, prompt: str, prompt_name: str) -> str:
         """
         Generates a mock image file and returns its path.

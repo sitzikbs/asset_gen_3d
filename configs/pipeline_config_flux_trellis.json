@@ -1,11 +1,13 @@
 {
+  "generation_mode": "pack",
+  "num_packs": 2,
+  "pack_size": 2,
   "text_generator": {
     "module": "prompt_pack_generator",
     "class": "PromptPackGenerator",
     "params": {
       "config_path": "configs/asset_pack_categories.json",
-      "seed": 42,
-      "pack_size": 3
+      "seed": 42
     }
   },
   "image_generator": {
