@@ -67,7 +67,7 @@ pip install torch==2.4.0 torchvision==0.19.0 --extra-index-url https://download.
 echo -e "\n${BOLD}Installing dependencies...${NC}"
 pip install diffusers==0.34.0 transformers==4.53.2 huggingface_hub==0.33.1
 pip install sentencepiece accelerate==1.8.1 tokenizers==0.21.2
-pip install charset_normalizer chardet protobuf pillow numpy
+pip install charset_normalizer chardet protobuf pillow numpy coolname
 pip install "xformers==0.0.27.post2" --extra-index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
 
 # install trellis dependencies 

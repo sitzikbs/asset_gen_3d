@@ -1,18 +1,20 @@
 import logging
-import uuid
 from typing import Dict, Any, Optional, Tuple
 from utils.file_utils import load_json_config
+from coolname import generate_slug
+import random
 
 def get_identifier(debug: bool, identifier: Optional[str]) -> str:
     """
-    Returns the experiment identifier. If not provided, returns 'debug_run' in debug mode or a new UUID otherwise.
+    Returns a unique, human-friendly identifier for the experiment run.
+    If identifier is provided, use it. If debug, use 'debug_run'. Otherwise, use a memorable coolname.
     """
     if identifier:
         return identifier
     if debug:
         return "debug_run"
-    logging.info("No experiment identifier provided, generating a new unique identifier for this run.")
-    return str(uuid.uuid4())
+    logging.info("No experiment identifier provided, generating a new human-friendly identifier for this run.")
+    return f"{generate_slug(3)}-{random.randint(1000, 9999)}"
 
 
 def configure_logging(debug: bool) -> None:

@@ -37,6 +37,7 @@ dependencies:
       - igraph
       - flash-attn
       - spconv
+      - coolname
 
 # manually install kaolin and nvdiffrast, spconv, diffoctreerast, and flash-attn
       

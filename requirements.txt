@@ -28,3 +28,4 @@ pymeshfix
 igraph
 spconv
 # manually install kaolin and nvdiffrast, spconv, diffoctreerast and flash-attn
+coolname
