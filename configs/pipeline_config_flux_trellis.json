@@ -1,0 +1,26 @@
+{
+  "text_generator": {
+    "module": "prompt_pack_generator",
+    "class": "PromptPackGenerator",
+    "params": {
+      "config_path": "configs/asset_pack_categories.json",
+      "seed": 42,
+      "pack_size": 3
+    }
+  },
+  "image_generator": {
+    "module": "flux_image_generator",
+    "class": "FluxImageGenerator",
+    "params": {
+      "model_id": "black-forest-labs/FLUX.1-schnell",
+      "quantization_type": "4bit"
+    }
+  },
+  "asset_generator": {
+    "module": "trellis_asset_generator",
+    "class": "TrellisAssetGenerator",
+    "params": {
+      "model_id": "microsoft/TRELLIS-image-large"
+    }
+  }
+}

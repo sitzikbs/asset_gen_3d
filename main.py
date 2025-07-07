@@ -30,7 +30,7 @@ class Pipeline:
         Initializes the pipeline, sets up output directories, and loads generator classes.
         """
         self.identifier = get_identifier(debug, identifier)
-        self.base_output_dir = os.path.join("output", self.identifier)
+        self.base_output_dir = os.path.join("outputs", self.identifier)
         if debug:
             logging.info("Running in debug mode. Using mock generators.")
             from modules.text_generators.mock_text_generator import MockTextGenerator
@@ -47,6 +47,7 @@ class Pipeline:
     def _load_generator(self, module_type: str, config: Dict[str, str], secrets: Dict[str, Any], output_dir: str) -> Optional[Any]:
         """
         Dynamically loads and instantiates a generator class based on config.
+        Passes any 'params' dict as kwargs to the generator constructor.
         Falls back to a mock generator if loading fails.
         """
         try:
@@ -57,8 +58,9 @@ class Pipeline:
             module = importlib.import_module(module_name)
             generator_class = getattr(module, config['class'])
             logging.debug(f"Successfully loaded generator class: {config['class']}")
-            return generator_class(secrets=secrets, output_dir=output_dir)
-        except (ImportError, AttributeError, KeyError) as e:
+            params = config.get('params', {})
+            return generator_class(secrets=secrets, output_dir=output_dir, **params)
+        except (ImportError, AttributeError, KeyError, TypeError) as e:
             logging.error(f"Error loading generator: {e}")
             logging.info(f"Falling back to mock generator for {module_type}.")
             if module_type == 'text_generators':
@@ -78,46 +80,82 @@ class Pipeline:
         detailed_prompt = self.text_generator.generate_prompt(base_prompt_text, prompt_name=prompt_name)
         logging.info(f"Generated detailed prompt: {detailed_prompt}")
 
-        # 2. Generate an image
+        # 2. Generate an image (defer asset generation)
         generated_image_path = self.image_generator.generate_image(detailed_prompt, prompt_name=prompt_name)
         logging.info(f"Generated image at: {generated_image_path}")
-
-        # 3. Generate the 3D asset
-        generated_asset_path = self.asset_generator.generate_asset(generated_image_path, prompt_name=prompt_name)
-        logging.info(f"Generated 3D asset at: {generated_asset_path}")
 
         return {
             "detailed_prompt": detailed_prompt,
             "image_path": generated_image_path,
-            "asset_path": generated_asset_path
+            # asset_path will be filled in later
         }
 
     def run(self, prompts_data: Dict[str, List[Dict[str, str]]]) -> None:
         """
         Runs the asset generation pipeline for all prompts in the provided data.
-        Saves results and logs progress for each prompt.
+        If the text generator supports prompt packs, generates all prompts at once.
+        Then generates all images, offloads the image generator, and generates all assets.
         """
         prompts_output_dir = os.path.join(self.base_output_dir, "prompts")
-        for base_prompt_info in prompts_data['prompts']:
+        all_artifacts = {}
+
+        # 1. Generate all prompts if using a pack generator
+        if hasattr(self.text_generator, "generate_pack"):
+            logging.info("Using prompt pack generator to generate all prompts at once.")
+            pack = self.text_generator.generate_pack(output_dir=prompts_output_dir)
+            prompt_list = pack["prompts"]
+        else:
+            prompt_list = prompts_data['prompts']
+
+        # 2. Generate all images
+        for base_prompt_info in prompt_list:
             prompt_name = base_prompt_info['name']
             base_prompt_text = base_prompt_info['text']
-            logging.info(f"--- Running pipeline for prompt: {prompt_name} ---")
-            artifacts = self._run_single_prompt(base_prompt_text, prompt_name)
-            if artifacts.get("asset_path"):
-                details_path = os.path.join(prompts_output_dir, f"{prompt_name}.json")
-                details_data = {
-                    "prompt_name": prompt_name,
-                    "base_prompt_text": base_prompt_text,
-                    "identifier": self.identifier,
-                    "artifacts": artifacts
-                }
+            logging.info(f"--- Running pipeline for prompt: {prompt_name} (image generation) ---")
 
-                with open(details_path, 'w') as f:
-                    json.dump(details_data, f, indent=4)
-
-                logging.info(f"Saved prompt details to: {details_path}")
+            # If the prompt is a dict (from a pack), use its 'text' directly
+            if isinstance(base_prompt_info, dict):
+                detailed_prompt = base_prompt_info['text']
             else:
-                logging.error(f"Asset generation failed for prompt: {prompt_name}")
+                detailed_prompt = base_prompt_text
+            generated_image_path = self.image_generator.generate_image(detailed_prompt, prompt_name=prompt_name)
+            logging.info(f"Generated image at: {generated_image_path}")
+            all_artifacts[prompt_name] = {
+                "prompt_name": prompt_name,
+                "base_prompt_text": base_prompt_text,
+                "identifier": self.identifier,
+                "artifacts": {
+                    "detailed_prompt": detailed_prompt,
+                    "image_path": generated_image_path
+                }
+            }
+
+        # 3. Offload image generator to free memory
+        logging.info("Offloading image generator to free GPU memory.")
+        del self.image_generator
+        import gc, torch
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        # 4. Generate all assets
+        for prompt_name, details_data in all_artifacts.items():
+            artifacts = details_data["artifacts"]
+            image_path = artifacts["image_path"]
+            logging.info(f"--- Running pipeline for prompt: {prompt_name} (asset generation) ---")
+            try:
+                asset_path = self.asset_generator.generate_asset(image_path, prompt_name)
+                artifacts["asset_path"] = asset_path
+                logging.info(f"Generated 3D asset at: {asset_path}")
+            except Exception as e:
+                logging.error(f"Asset generation failed for prompt: {prompt_name}: {e}")
+                artifacts["asset_path"] = None
+
+            # Save details after asset generation
+            details_path = os.path.join(prompts_output_dir, f"{prompt_name}.json")
+            with open(details_path, 'w') as f:
+                json.dump(details_data, f, indent=4)
+            logging.info(f"Saved prompt details to: {details_path}")
             logging.info(f"--- Pipeline run for {prompt_name} finished ---")
 
 

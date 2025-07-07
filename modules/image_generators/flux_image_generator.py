@@ -15,16 +15,19 @@ class FluxImageGenerator(BaseImageGenerator):
     Image generator using any FLUX.1 model via Hugging Face diffusers.
     Implements the BaseImageGenerator interface.
     """
-    def __init__(self, secrets: Optional[Dict[str, Any]] = None, output_dir: str = "output/images", model_id: str = "black-forest-labs/FLUX.1-schnell", quantization_type: Literal["none", "4bit", "8bit"] = "none"):
+    def __init__(self, secrets: Optional[Dict[str, Any]] = None, output_dir: str = "output/images", model_id: str = "black-forest-labs/FLUX.1-schnell", quantization_type: str = "none", **kwargs):
         super().__init__(secrets or {}, output_dir)
         self.model_id = model_id
         self.quantization_type = quantization_type
+        # Accept and store any additional parameters
+        self.extra_params = kwargs
         # Detect device
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         torch_dtype = torch.bfloat16 if self.device.type == "cuda" else torch.bfloat32
 
+        logging.info(f"FluxImageGenerator: Initializing with model_id={self.model_id}, quantization_type={self.quantization_type}, output_dir={self.output_dir}")
 
-        if not self.quantization_type == "none":
+        if self.quantization_type != "none":
             if self.quantization_type == "4bit":
                 quant_config = self._get_4bit_quantization_config()
             elif self.quantization_type == "8bit":
@@ -32,19 +35,34 @@ class FluxImageGenerator(BaseImageGenerator):
             else:
                 raise ValueError(f"Unsupported quantization type: {self.quantization_type}. Use 'none', '4bit', or '8bit'.")
 
+            logging.info("FluxImageGenerator: Loading FluxPipeline with quantization.")
             self.pipe = FluxPipeline.from_pretrained(
                 self.model_id,
                 quantization_config=quant_config,
                 torch_dtype=torch_dtype,
             ).to(self.device)
 
-        else: 
+        else:
+            logging.info("FluxImageGenerator: Loading FluxPipeline without quantization.")
             self.pipe = FluxPipeline.from_pretrained(
-            self.model_id,
-            torch_dtype=torch_dtype,
+                self.model_id,
+                torch_dtype=torch_dtype,
             )
             self.pipe.enable_sequential_cpu_offload()
-        
+
+        logging.info("FluxImageGenerator: Pipeline loaded and ready.")
+    def generate_image(self, prompt: str, prompt_name: str) -> str:
+        """
+        Generates an image from a prompt and saves it to the output directory.
+        """
+        if not os.path.exists(self.output_dir):
+            os.makedirs(self.output_dir, exist_ok=True)
+        logging.info(f"FluxImageGenerator: Generating image for '{prompt_name}' with prompt: {prompt}")
+        image = self.pipe(prompt)[0]
+        image_path = os.path.join(self.output_dir, f"{prompt_name}.png")
+        image.save(image_path)
+        logging.info(f"FluxImageGenerator: Image saved at '{image_path}'")
+        return image_path
 
     def _get_4bit_quantization_config(self) -> PipelineQuantizationConfig:
         """
@@ -121,7 +139,7 @@ def test_flux_image_generator(show_image: bool = True, cleanup: bool = False, mo
 
     print(f"Testing FluxImageGenerator with model: {model_id}")
     
-    debug_dir = "outputs/debug/image_gen"
+    debug_dir = "outputs/test_image_gen"
     os.makedirs(debug_dir, exist_ok=True)
 
     generator = FluxImageGenerator(secrets={}, output_dir=debug_dir, model_id=model_id, quantization_type=quantization_type)
